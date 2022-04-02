@@ -1,0 +1,120 @@
+//DRIVE PARAMETERS - USER SHOULD SET
+const int STEPS_PER_REV = 200;
+const int PULSES_PER_STEP = 8;
+const int SCREW_PITCH = 800; // micron per revolution
+const long TOTAL_LENGTH_MICRONS = 65000;
+int PULSES_PER_MICRON = (STEPS_PER_REV * PULSES_PER_STEP)/SCREW_PITCH;
+long TOTAL_LENGTH_PULSES = TOTAL_LENGTH_MICRONS * PULSES_PER_MICRON;
+
+//CONNECTION PARAMETERS - USER SHOULD CHECK
+const int pulse_pin = 11;
+const int dir_pin = 12;
+
+//Movement Parameters - user should leave
+long current_pos = 0;
+long final_pos = 0; //pulses
+long time = 0;  //microseconds
+int directn = 1; //1 = forwards, -1 = reverse
+unsigned long last_step_time = 0;
+int micros_per_pulse = 0;
+
+
+void setup() {
+  Serial.begin(115200);
+  Serial.write("X"); // write back to python to confirm connection
+  pinMode(pulse_pin, OUTPUT); 
+  pinMode(dir_pin, OUTPUT);
+  digitalWrite(pulse_pin, LOW);
+  digitalWrite(dir_pin, LOW);
+}
+
+
+
+void loop() {
+  if (Serial.available() > 5) { //min is 6 e.g. 1,2,3,
+      long new_length = Serial.parseInt(); 
+      long new_time = Serial.parseInt(); 
+      int new_directn = Serial.parseInt();
+  
+      if (new_length == 9999 && new_time == 9999 && new_directn == 9999) {
+        stopdriver();
+      } else if (new_length == 8888 && new_time == 8888 && new_directn == 8888) {
+        move_to_zero();
+      } else if (new_length == 7777 && new_time == 7777 && new_directn == 7777) {
+        start_zeroing();
+      } else if (new_length == 6666 && new_time == 6666 && new_directn == 6666) {
+        stop_zeroing();
+      } else {
+        set_driver(new_length, new_time, new_directn);
+      }
+  } else {
+    drive();
+  }
+}
+
+void set_driver(long new_length, long new_time, int new_directn) {
+  int msg = check_setting(new_length, new_time, new_directn);
+  if (msg == 1) {
+    final_pos = current_pos + (new_length * new_directn * PULSES_PER_MICRON);
+    micros_per_pulse = new_time / (new_length * PULSES_PER_MICRON);
+    directn = new_directn;
+    if (directn == 1) {
+      digitalWrite(dir_pin, LOW); //FOWARD
+    } else {
+      digitalWrite(dir_pin, HIGH); //BACKWARD
+    }
+  }
+  Serial.println(msg); //TELL PYTHON THE SITUATION    
+}
+
+int check_setting(long new_length, long new_time, int new_directn) {
+  // Function to check settings.
+  if (new_length/(float(new_time)/1000) > PULSES_PER_STEP) { //Arbitrary speed limit
+    return -1; //too fast
+  }
+  if (new_directn == 1) {
+    if (current_pos + new_length * PULSES_PER_MICRON > TOTAL_LENGTH_PULSES) {
+      return -2; //off end
+    } 
+  }
+  if (new_directn == -1) {
+    if (current_pos - new_length * PULSES_PER_MICRON < 0) {
+      return -3; //off start
+    } 
+  } 
+  return 1;
+}
+
+void drive() {
+  if (abs(current_pos - final_pos) > 0) {
+    if (micros() - last_step_time > micros_per_pulse ) {
+      digitalWrite(pulse_pin, HIGH);
+      digitalWrite(pulse_pin, LOW);
+      current_pos += directn;
+      last_step_time = micros();
+    }
+  }
+}
+
+void stopdriver() {
+  final_pos = current_pos;  
+}
+
+void start_zeroing() {
+  digitalWrite(dir_pin, HIGH);
+  directn = -1;
+  micros_per_pulse = 200;
+  final_pos = 2147483647;
+}
+
+void stop_zeroing() {
+  final_pos = 0;
+  current_pos = 0;
+}
+
+void move_to_zero() {
+  digitalWrite(dir_pin, HIGH);
+  directn = -1;
+  micros_per_pulse = 200;
+  final_pos = 0;
+}

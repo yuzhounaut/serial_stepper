@@ -1,0 +1,141 @@
+import serial
+import time
+from Tkinter import *
+import tkMessageBox
+
+
+COMPORT = "COM7"
+BAUD = 115200
+
+
+class Stepper_gui:
+    def __init__(self):
+        self.window = Tk()
+        self.window.title("Stepper Control")
+
+        self.zero_button = Button(self.window, text="Setup Zero Position", command=self.setup_zero)
+        self.zero_button.pack()
+
+        self.move_zero_button = Button(self.window, text="Move to set Zero", command=self.move_to_zero)
+        self.move_zero_button.pack()
+
+        dl_lab = Label(self.window, text="Drive Length (mm)")
+        dl_lab.pack()
+        self.drive_length = StringVar()
+        self.drive_length.set("1")
+        self.drive_length_entry = Entry(self.window, textvariable=self.drive_length)
+        self.drive_length_entry.pack()
+        
+        dd_lab = Label(self.window, text="Drive Duration (s)")
+        dd_lab.pack()
+
+        self.drive_duration = StringVar()
+        self.drive_duration.set("10")
+        self.drive_duration_entry = Entry(self.window, textvariable=self.drive_duration)
+        self.drive_duration_entry.pack()
+
+        dir_lab = Label(self.window, text="Drive Direction")
+        dir_lab.pack()
+
+        self.dir_str = StringVar()
+        self.dir_str.set("1")
+        self.frwd_btn = Radiobutton(self.window, text="Forward", variable=self.dir_str, value="1")
+        self.frwd_btn.pack()
+        self.back_btn = Radiobutton(self.window, text="Backward", variable=self.dir_str, value="-1")
+        self.back_btn.pack()
+
+        self.go_button = Button(self.window, text="Drive Syringe", command=self.drive)
+        self.go_button.pack()
+
+        self.stop_button = Button(self.window, text="STOP", command=self.stop_drive)
+        self.stop_button.pack()
+        
+        self.ser = Simple_serial(COMPORT, BAUD)
+        
+    def setup_zero(self):
+        self.ser.write("7777,7777,7777")
+        self.zero_button.config(text="Set Zero")
+        self.zero_button.config(command=self.set_zero)
+
+    def set_zero(self):
+        self.ser.write("6666,6666,6666")
+        self.zero_button.config(text="Setup Zero Position")
+        self.zero_button.config(command=self.setup_zero)
+
+    def move_to_zero(self):
+        self.ser.write("8888,8888,8888")
+
+    def drive(self):
+        self.ser.write( str(int(round(float( self.drive_length.get() ) * 1000)))  + "," + str( int(round(float(self.drive_duration.get())) * 1000000 )) + "," + self.dir_str.get())
+        self.check_code( self.ser.readline() )
+
+    def stop_drive(self):
+        self.ser.write("9999,9999,9999")
+
+    def check_code(self, code):
+        if code != "1":
+            if code == "-1":
+                tkMessageBox.showwarning("Warning", "Move velocity is too high")
+            elif code == "-2":
+                tkMessageBox.showwarning("Warning", "Move distance too far")
+            elif code == "-3":
+                tkMessageBox.showwarning("Warning", "Move distance beyond zero point")
+            else:
+                tkMessageBox.showwarning("Warning", "Unknown Error")
+
+
+class Simple_serial:
+    def __init__(self, com, baud):
+        self.serial = None
+        self.com = com
+        self.baud = baud
+        self.__connect__()
+
+    def __connect__(self):
+        try:
+            self.serial = serial.Serial(self.com, self.baud, timeout = 1)
+        except ValueError:
+            print "Value Error Exception!!!"
+            #Raise some warning in future
+        except SerialException:
+            print "Serial Exception!!!"
+        else: #Serial connection threw no exceptions
+            if not self.serial.isOpen():
+                self.serial.open()
+            '''
+            Wait for connection to form. When serial connection is established
+            the arduino restarts. The code below waits until the arduino reports
+            back. On the arduino, in the setup() block, there should be:
+                Serial.begin(28800);
+                Serial.write("X");
+            Thus, as soon as the connection is established, arduio sends "X" and
+            when we recieve "X", we know the connection is good. 
+            '''
+            read = ""
+            start = time.time()
+            connection_timeout = 3 #seconds
+            while time.time()-start < connection_timeout:
+                read = self.serial.read()
+                if read == "X":
+                    break
+            if read == "":
+                raise SerialException("Incorrectly configured device")
+
+    def write(self, output):
+        self.serial.write(output)
+
+    def readline(self):
+        ms = time.time()*1000.0
+        line = ""
+        while True:
+            line += self.serial.read(1)
+            if "\n" in line:
+                return line[0:-2]
+            if time.time()*1000.0 - ms > 5000:
+                return ""
+        
+
+
+if __name__ == '__main__':
+    App = Stepper_gui()
+    App.window.mainloop()
